@@ -1,0 +1,52 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: lego-parser-db
+    environment:
+      POSTGRES_DB: lego_parser
+      POSTGRES_USER: parser
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-parserpass}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parser -d lego_parser"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  chrome:
+    image: chromedp/headless-shell:latest
+    container_name: lego-parser-chrome
+    ports:
+      - "9222:9222"
+    shm_size: "2gb"
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: lego-parser-backend
+    ports:
+      - "8081:8081"
+    environment:
+      DATABASE_URL: postgres://parser:${DB_PASSWORD:-parserpass}@db:5432/lego_parser?sslmode=disable
+      CHROME_WS_URL: ws://chrome:9222
+      CRON_SCHEDULE: "0 0 6 * * *"
+      WOLT_LAT: "41.7151"
+      WOLT_LON: "44.8271"
+      RATE_LIMIT_DELAY: "500ms"
+      PORT: "8081"
+    depends_on:
+      db:
+        condition: service_healthy
+      chrome:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  pgdata:
