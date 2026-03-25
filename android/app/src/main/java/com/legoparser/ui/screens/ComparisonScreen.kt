@@ -22,21 +22,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.legoparser.api.PriceComparison
+import com.legoparser.data.db.PriceComparisonRow
 import com.legoparser.viewmodel.ComparisonViewModel
 
-private data class PriceCol(val label: String, val key: String, val getter: (PriceComparison) -> Double?)
-
-private val priceCols = listOf(
-    PriceCol("Bibl XS", "biblusi_xs_price") { it.biblusi_xs_price },
-    PriceCol("Bibl Pep", "biblusi_pepela_price") { it.biblusi_pepela_price },
-    PriceCol("Wolt XS", "wolt_xs_price") { it.wolt_xs_price },
-    PriceCol("Wolt Pep", "wolt_pepela_price") { it.wolt_pepela_price },
-    PriceCol("Glov XS", "glovo_xs_price") { it.glovo_xs_price },
-    PriceCol("Glov Pep", "glovo_pepela_price") { it.glovo_pepela_price },
-    PriceCol("Wish", "wishlist_price") { it.wishlist_price },
-    PriceCol("Piccola", "piccolatoys_price") { it.piccolatoys_price },
-    PriceCol("Kubiki", "kubiki_price") { it.kubiki_price },
+private data class PCol(val label: String, val get: (PriceComparisonRow) -> Double?)
+private val cols = listOf(
+    PCol("Bibl XS") { it.biblusi_xs }, PCol("Bibl Pep") { it.biblusi_pepela },
+    PCol("Wolt XS") { it.wolt_xs }, PCol("Wolt Pep") { it.wolt_pepela },
+    PCol("Glov XS") { it.glovo_xs }, PCol("Glov Pep") { it.glovo_pepela },
+    PCol("Wish") { it.wishlist }, PCol("Piccola") { it.piccolatoys }, PCol("Kubiki") { it.kubiki }
 )
 
 @Composable
@@ -44,125 +38,70 @@ fun ComparisonScreen(vm: ComparisonViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     var searchInput by remember { mutableStateOf("") }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
         OutlinedTextField(
-            value = searchInput,
-            onValueChange = { searchInput = it },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Search by name, LEGO ID...") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-            singleLine = true,
-            trailingIcon = {
-                if (searchInput.isNotBlank()) {
-                    TextButton(onClick = { vm.setSearch(searchInput) }) { Text("Search") }
-                }
-            }
+            value = searchInput, onValueChange = { searchInput = it },
+            modifier = Modifier.fillMaxWidth(), placeholder = { Text("Search...") },
+            leadingIcon = { Icon(Icons.Default.Search, null) }, singleLine = true,
+            trailingIcon = { TextButton(onClick = { vm.setSearch(searchInput) }) { Text("Go") } }
         )
-
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(Modifier.height(8.dp))
 
         if (state.isLoading) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         } else {
-            LazyColumn(modifier = Modifier.weight(1f)) {
+            LazyColumn(Modifier.weight(1f)) {
                 items(state.items) { item ->
-                    ComparisonCard(item, vm)
+                    val prices = cols.map { it.get(item) }
+                    val valid = prices.filterNotNull()
+                    val min = valid.minOrNull()
+                    val max = valid.maxOrNull()
+
+                    Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(item.nameKa, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            item.invoiceCode?.let {
+                                Text("LEGO $it", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                prices.forEachIndexed { i, price ->
+                                    val bg = when {
+                                        price == null || valid.size < 2 -> Color.Transparent
+                                        price == min -> Color(0xFFDCFCE7)
+                                        price == max -> Color(0xFFFEE2E2)
+                                        else -> Color.Transparent
+                                    }
+                                    val tc = when {
+                                        price == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                                        valid.size < 2 -> MaterialTheme.colorScheme.onSurface
+                                        price == min -> Color(0xFF166534)
+                                        price == max -> Color(0xFF991B1B)
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    }
+                                    Surface(color = bg, shape = MaterialTheme.shapes.small, modifier = Modifier.width(58.dp)) {
+                                        Column(Modifier.padding(3.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(cols[i].label, fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text(
+                                                if (price != null) "%.1f".format(price) else "-",
+                                                fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                                                fontWeight = if (price == min && valid.size >= 2) FontWeight.Bold else FontWeight.Normal,
+                                                color = tc, textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
-
             if (state.totalPages > 1) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Page ${state.page} / ${state.totalPages}", style = MaterialTheme.typography.bodySmall)
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("${state.page} / ${state.totalPages}", style = MaterialTheme.typography.bodySmall)
                     Row {
-                        IconButton(onClick = { vm.setPage(state.page - 1) }, enabled = state.page > 1) {
-                            Icon(Icons.Default.ArrowBack, "Previous")
-                        }
-                        IconButton(onClick = { vm.setPage(state.page + 1) }, enabled = state.page < state.totalPages) {
-                            Icon(Icons.Default.ArrowForward, "Next")
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ComparisonCard(item: PriceComparison, vm: ComparisonViewModel) {
-    val prices = priceCols.map { it.getter(item) }
-    val validPrices = prices.filterNotNull()
-    val minPrice = validPrices.minOrNull()
-    val maxPrice = validPrices.maxOrNull()
-
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                item.name_ka,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (item.invoice_code != null) {
-                Text(
-                    "LEGO ${item.invoice_code}",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                priceCols.forEachIndexed { i, col ->
-                    val price = prices[i]
-                    val bgColor = when {
-                        price == null -> Color.Transparent
-                        validPrices.size < 2 -> Color.Transparent
-                        price == minPrice -> Color(0xFFDCFCE7)
-                        price == maxPrice -> Color(0xFFFEE2E2)
-                        else -> Color.Transparent
-                    }
-                    val textColor = when {
-                        price == null -> MaterialTheme.colorScheme.onSurfaceVariant
-                        validPrices.size < 2 -> MaterialTheme.colorScheme.onSurface
-                        price == minPrice -> Color(0xFF166534)
-                        price == maxPrice -> Color(0xFF991B1B)
-                        else -> MaterialTheme.colorScheme.onSurface
-                    }
-
-                    Surface(
-                        color = bgColor,
-                        shape = MaterialTheme.shapes.small,
-                        modifier = Modifier.width(62.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(4.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(col.label, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(
-                                if (price != null) "%.2f".format(price) else "-",
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = if (price == minPrice && validPrices.size >= 2) FontWeight.Bold else FontWeight.Normal,
-                                color = textColor,
-                                textAlign = TextAlign.Center
-                            )
-                        }
+                        IconButton(onClick = { vm.setPage(state.page - 1) }, enabled = state.page > 1) { Icon(Icons.Default.ArrowBack, "Prev") }
+                        IconButton(onClick = { vm.setPage(state.page + 1) }, enabled = state.page < state.totalPages) { Icon(Icons.Default.ArrowForward, "Next") }
                     }
                 }
             }

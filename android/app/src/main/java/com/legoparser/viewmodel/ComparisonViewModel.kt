@@ -1,48 +1,41 @@
 package com.legoparser.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.legoparser.api.ApiClient
-import com.legoparser.api.PriceComparison
+import com.legoparser.data.db.AppDatabase
+import com.legoparser.data.db.PriceComparisonRow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 data class ComparisonState(
-    val items: List<PriceComparison> = emptyList(),
-    val total: Int = 0,
-    val page: Int = 1,
-    val totalPages: Int = 0,
-    val search: String = "",
-    val sortBy: String = "name_ka",
-    val sortOrder: String = "asc",
-    val isLoading: Boolean = false,
-    val error: String? = null
+    val items: List<PriceComparisonRow> = emptyList(),
+    val total: Int = 0, val page: Int = 1, val totalPages: Int = 0,
+    val search: String = "", val sortBy: String = "name_ka", val sortOrder: String = "asc",
+    val isLoading: Boolean = false
 )
 
-class ComparisonViewModel : ViewModel() {
+class ComparisonViewModel(app: Application) : AndroidViewModel(app) {
+    private val dao = AppDatabase.get(app).productDao()
     private val _state = MutableStateFlow(ComparisonState())
     val state = _state.asStateFlow()
+    private val perPage = 20
 
     init { load() }
 
     fun load() {
         viewModelScope.launch {
-            _state.value = _state.value.copy(isLoading = true, error = null)
-            try {
-                val s = _state.value
-                val resp = ApiClient.api.getComparison(
-                    page = s.page, search = s.search.ifBlank { null },
-                    sortBy = s.sortBy, sortOrder = s.sortOrder
-                )
-                _state.value = s.copy(
-                    items = resp.data ?: emptyList(),
-                    total = resp.total, totalPages = resp.total_pages,
-                    isLoading = false
-                )
-            } catch (e: Exception) {
-                _state.value = _state.value.copy(isLoading = false, error = e.message)
-            }
+            _state.value = _state.value.copy(isLoading = true)
+            val s = _state.value
+            val search = s.search.ifBlank { null }
+            val total = dao.countComparison(search)
+            val offset = (s.page - 1) * perPage
+            val items = dao.getComparison(search, s.sortBy, s.sortOrder, perPage, offset)
+            _state.value = s.copy(
+                items = items, total = total,
+                totalPages = (total + perPage - 1) / perPage, isLoading = false
+            )
         }
     }
 

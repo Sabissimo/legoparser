@@ -1,60 +1,37 @@
 package com.legoparser.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.legoparser.api.ApiClient
-import com.legoparser.api.ScrapeRequest
-import com.legoparser.api.ScrapeRun
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import com.legoparser.data.db.AppDatabase
+import com.legoparser.data.db.ScrapeRunEntity
+import com.legoparser.data.scraper.ScraperManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 data class ScraperState(
-    val runs: List<ScrapeRun> = emptyList(),
-    val isRunning: Boolean = false,
-    val isLoading: Boolean = false,
-    val error: String? = null
+    val runs: List<ScrapeRunEntity> = emptyList(),
+    val isRunning: Boolean = false
 )
 
-class ScraperViewModel : ViewModel() {
-    private val _state = MutableStateFlow(ScraperState())
-    val state = _state.asStateFlow()
+class ScraperViewModel(app: Application) : AndroidViewModel(app) {
+    private val db = AppDatabase.get(app)
+    private val manager = ScraperManager(app)
 
-    init { loadRuns(); pollStatus() }
+    val state: StateFlow<ScraperState> = combine(
+        db.scrapeRunDao().getAll(),
+        db.scrapeRunDao().isRunning()
+    ) { runs, running ->
+        ScraperState(runs = runs, isRunning = running)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ScraperState())
 
-    fun loadRuns() {
-        viewModelScope.launch {
-            try {
-                val runs = ApiClient.api.getScrapeRuns()
-                _state.value = _state.value.copy(runs = runs)
-            } catch (_: Exception) {}
-        }
-    }
-
-    private fun pollStatus() {
-        viewModelScope.launch {
-            while (true) {
-                try {
-                    val status = ApiClient.api.getScrapeStatus()
-                    _state.value = _state.value.copy(isRunning = status.is_running)
-                    if (status.is_running) loadRuns()
-                } catch (_: Exception) {}
-                delay(3000)
-            }
-        }
-    }
+    val sources = manager.allSources
 
     fun startScrape(source: String) {
-        viewModelScope.launch {
-            try {
-                ApiClient.api.startScrape(ScrapeRequest(source))
-                _state.value = _state.value.copy(isRunning = true)
-                delay(1000)
-                loadRuns()
-            } catch (e: Exception) {
-                _state.value = _state.value.copy(error = e.message)
-            }
+        viewModelScope.launch(Dispatchers.IO) {
+            if (source == "all") manager.runAll()
+            else manager.runSource(source)
         }
     }
 }

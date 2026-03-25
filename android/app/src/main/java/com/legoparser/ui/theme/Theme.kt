@@ -8,19 +8,14 @@ import androidx.compose.ui.platform.LocalContext
 
 @Composable
 fun LegoParserTheme(content: @Composable () -> Unit) {
-    val darkTheme = isSystemInDarkTheme()
-    val colorScheme = when {
+    val dark = isSystemInDarkTheme()
+    val colors = when {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            val ctx = LocalContext.current
+            if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
         }
-        darkTheme -> darkColorScheme()
+        dark -> darkColorScheme()
         else -> lightColorScheme()
     }
-
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography(),
-        content = content
-    )
+    MaterialTheme(colorScheme = colors, typography = Typography(), content = content)
 }
